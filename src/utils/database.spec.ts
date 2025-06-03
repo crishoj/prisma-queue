@@ -1,10 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { detectDatabaseProvider, databaseProvider, resetDatabaseProviderCache } from "./database";
+import { describe, expect, it, vi } from "vitest";
+import { detectDatabaseProvider, databaseProvider } from "./database";
 
 describe("detectDatabaseProvider", () => {
-  beforeEach(() => {
-    resetDatabaseProviderCache();
-  });
 
   it("should detect PostgreSQL", async () => {
     const mockPrisma = {
@@ -73,11 +70,7 @@ describe("detectDatabaseProvider", () => {
 });
 
 describe("databaseProvider", () => {
-  beforeEach(() => {
-    resetDatabaseProviderCache();
-  });
-
-  it("should detect PostgreSQL with caching", async () => {
+  it("should detect PostgreSQL and log result", async () => {
     const mockPrisma = {
       $queryRaw: vi.fn()
         .mockResolvedValueOnce([]) // First SELECT 1 succeeds
@@ -89,18 +82,15 @@ describe("databaseProvider", () => {
     expect(mockPrisma.$queryRaw).toHaveBeenCalledTimes(2);
   });
 
-  it("should use cached result on subsequent calls", async () => {
+  it("should detect SQLite and log result", async () => {
     const mockPrisma = {
       $queryRaw: vi.fn()
-        .mockResolvedValueOnce([]) // First SELECT 1 succeeds
-        .mockResolvedValueOnce([{ server_version: "14.0" }]), // SHOW server_version succeeds
+        .mockRejectedValueOnce(new Error("PostgreSQL query failed")) // PostgreSQL fails
+        .mockResolvedValueOnce([{ "sqlite_version()": "3.39.0" }]), // SQLite succeeds
     };
 
-    const provider1 = await databaseProvider(mockPrisma);
-    const provider2 = await databaseProvider(mockPrisma);
-    
-    expect(provider1).toBe("postgresql");
-    expect(provider2).toBe("postgresql");
-    expect(mockPrisma.$queryRaw).toHaveBeenCalledTimes(2); // Should not call again due to caching
+    const provider = await databaseProvider(mockPrisma);
+    expect(provider).toBe("sqlite");
+    expect(mockPrisma.$queryRaw).toHaveBeenCalledTimes(2);
   });
 });

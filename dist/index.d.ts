@@ -85,6 +85,12 @@ declare class PrismaJob<T, U> {
     isLocked(): Promise<boolean>;
 }
 
+type DatabaseProvider = "postgresql" | "sqlite" | "mysql" | "sqlserver" | "mongodb" | "cockroachdb";
+
+type InputJsonValue = Prisma.InputJsonValue;
+declare function prepareForJson<T>(originalValue: T): InputJsonValue;
+declare function restoreFromJson<T = unknown>(preparedValue: InputJsonValue): T;
+
 type PrismaQueueOptions = {
     prisma?: PrismaClient;
     name?: string;
@@ -125,6 +131,7 @@ declare class PrismaQueue<T extends JobPayload = JobPayload, U extends JobResult
     worker: JobWorker<T, U>;
     private name;
     private config;
+    private provider;
     private concurrency;
     private stopped;
     /**
@@ -145,6 +152,10 @@ declare class PrismaQueue<T extends JobPayload = JobPayload, U extends JobResult
      * Stops the job processing in the queue.
      */
     stop(): Promise<void>;
+    /**
+     * Manually set the database provider (useful for testing or when auto-detection fails).
+     */
+    setProvider(provider: DatabaseProvider): void;
     /**
      * Adds a job to the queue.
      * @param payloadOrFunction - The job payload or a function that returns a job payload.
@@ -199,10 +210,6 @@ declare class PrismaQueue<T extends JobPayload = JobPayload, U extends JobResult
      */
     size(onlyAvailable?: boolean): Promise<number>;
 }
-
-type InputJsonValue = Prisma.InputJsonValue;
-declare function prepareForJson<T>(originalValue: T): InputJsonValue;
-declare function restoreFromJson<T = unknown>(preparedValue: InputJsonValue): T;
 
 /**
  * Factory function to create a new PrismaQueue instance.

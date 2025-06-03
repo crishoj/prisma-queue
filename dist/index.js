@@ -9,7 +9,6 @@ import createDebug from "debug";
 var debug = createDebug("prisma-queue");
 
 // src/utils/database.ts
-var cachedProvider = null;
 async function detectDatabaseProvider(prisma) {
   try {
     await prisma.$queryRaw`SELECT 1`;
@@ -35,12 +34,9 @@ async function detectDatabaseProvider(prisma) {
   }
 }
 async function databaseProvider(prisma) {
-  if (cachedProvider) {
-    return cachedProvider;
-  }
-  cachedProvider = await detectDatabaseProvider(prisma);
-  debug(`detected database provider: ${cachedProvider}`);
-  return cachedProvider;
+  const provider = await detectDatabaseProvider(prisma);
+  debug(`detected database provider: ${provider}`);
+  return provider;
 }
 
 // src/utils/error.ts
@@ -327,6 +323,7 @@ var PrismaQueue = class extends EventEmitter {
   #prisma;
   name;
   config;
+  provider = null;
   concurrency = 0;
   stopped = true;
   /**
@@ -345,6 +342,10 @@ var PrismaQueue = class extends EventEmitter {
       debug(`queue named="${this.name}" is already running, skipping...`);
       return;
     }
+    if (!this.provider) {
+      this.provider = await databaseProvider(this.#prisma);
+      debug(`detected database provider: ${this.provider}`);
+    }
     this.stopped = false;
     return this.poll();
   }
@@ -356,6 +357,13 @@ var PrismaQueue = class extends EventEmitter {
     debug(`stopping queue named="${this.name}"...`);
     this.stopped = true;
     await waitFor(pollInterval);
+  }
+  /**
+   * Manually set the database provider (useful for testing or when auto-detection fails).
+   */
+  setProvider(provider) {
+    this.provider = provider;
+    debug(`manually set database provider: ${provider}`);
   }
   /**
    * Adds a job to the queue.
@@ -524,14 +532,16 @@ var PrismaQueue = class extends EventEmitter {
     return job;
   }
   async dequeueByProvider() {
-    const provider = await databaseProvider(this.#prisma);
-    switch (provider) {
+    if (!this.provider) {
+      throw new Error("Database provider not detected. Make sure to call start() first.");
+    }
+    switch (this.provider) {
       case "postgresql":
         return await this.dequeueWithSkipLocked();
       case "sqlite":
         return await this.dequeueWithOptimisticLocking();
       default:
-        throw Error(`Unsupported provider:  ${provider}`);
+        throw Error(`Unsupported provider: ${this.provider}`);
     }
   }
   /**

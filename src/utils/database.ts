@@ -6,12 +6,6 @@ export interface PrismaLike {
   $queryRaw: (query: any, ...values: any[]) => Promise<any>;
 }
 
-let cachedProvider: DatabaseProvider | null = null;
-
-export function resetDatabaseProviderCache(): void {
-  cachedProvider = null;
-}
-
 export async function detectDatabaseProvider(prisma: PrismaLike): Promise<DatabaseProvider> {
   try {
     await prisma.$queryRaw`SELECT 1`;
@@ -38,13 +32,7 @@ export async function detectDatabaseProvider(prisma: PrismaLike): Promise<Databa
 }
 
 export async function databaseProvider(prisma: PrismaLike): Promise<DatabaseProvider> {
-  if (cachedProvider) {
-    return cachedProvider;
-  }
-
-  cachedProvider = await detectDatabaseProvider(prisma);
-
-  debug(`detected database provider: ${cachedProvider}`);
-
-  return cachedProvider;
+  const provider = await detectDatabaseProvider(prisma);
+  debug(`detected database provider: ${provider}`);
+  return provider;
 }

@@ -14,7 +14,8 @@ import {
   getTableName,
   serializeError,
   uncapitalize,
-  waitFor
+  waitFor,
+  type DatabaseProvider,
 } from "./utils";
 
 export type PrismaQueueOptions = {
@@ -73,6 +74,7 @@ export class PrismaQueue<
   #prisma: PrismaClient;
   private name: string;
   private config: Required<Omit<PrismaQueueOptions, "name" | "prisma">>;
+  private provider: DatabaseProvider | null = null;
 
   private concurrency = 0;
   private stopped = true;
@@ -146,6 +148,13 @@ export class PrismaQueue<
       debug(`queue named="${this.name}" is already running, skipping...`);
       return;
     }
+    
+    // Detect database provider once at startup
+    if (!this.provider) {
+      this.provider = await databaseProvider(this.#prisma);
+      debug(`detected database provider: ${this.provider}`);
+    }
+    
     this.stopped = false;
     return this.poll();
   }
@@ -159,6 +168,14 @@ export class PrismaQueue<
     this.stopped = true;
     // Wait for the queue to stop
     await waitFor(pollInterval);
+  }
+
+  /**
+   * Manually set the database provider (useful for testing or when auto-detection fails).
+   */
+  public setProvider(provider: DatabaseProvider): void {
+    this.provider = provider;
+    debug(`manually set database provider: ${provider}`);
   }
 
   /**
@@ -356,15 +373,17 @@ export class PrismaQueue<
   }
 
   private async dequeueByProvider(): Promise<PrismaJob<T, U> | null> {
-    const provider = await databaseProvider(this.#prisma);
+    if (!this.provider) {
+      throw new Error("Database provider not detected. Make sure to call start() first.");
+    }
 
-    switch (provider) {
+    switch (this.provider) {
       case "postgresql":
         return await this.dequeueWithSkipLocked();
       case "sqlite":
         return await this.dequeueWithOptimisticLocking();
       default:
-        throw Error(`Unsupported provider:  ${provider}`);
+        throw Error(`Unsupported provider: ${this.provider}`);
     }
   }
 
