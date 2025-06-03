@@ -1,7 +1,6 @@
 .DS_Store
 coverage/
 data/
-dist/
 lib/
 node_modules/
 .vscode/
