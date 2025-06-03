@@ -102,6 +102,7 @@ type PrismaQueueOptions = {
     tableName?: string;
     deleteOn?: "success" | "failure" | "always" | "never";
     alignTimeZone?: boolean;
+    provider?: DatabaseProvider;
 };
 type EnqueueOptions = {
     cron?: string;

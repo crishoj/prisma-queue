@@ -336,13 +336,15 @@ var PrismaQueue = class extends import_events.EventEmitter {
       pollInterval = DEFAULT_POLL_INTERVAL,
       jobInterval = DEFAULT_JOB_INTERVAL,
       deleteOn = DEFAULT_DELETE_ON,
-      alignTimeZone = false
+      alignTimeZone = false,
+      provider = null
     } = this.options;
     (0, import_node_assert.default)(name.length <= 255, "name must be less or equal to 255 chars");
     (0, import_node_assert.default)(pollInterval >= 100, "pollInterval must be more than 100 ms");
     (0, import_node_assert.default)(jobInterval >= 10, "jobInterval must be more than 10 ms");
     this.name = name;
     this.#prisma = prisma;
+    this.provider = provider;
     this.config = {
       modelName,
       tableName,
@@ -385,6 +387,8 @@ var PrismaQueue = class extends import_events.EventEmitter {
     if (!this.provider) {
       this.provider = await databaseProvider(this.#prisma);
       debug(`detected database provider: ${this.provider}`);
+    } else {
+      debug(`using configured database provider: ${this.provider}`);
     }
     this.stopped = false;
     return this.poll();

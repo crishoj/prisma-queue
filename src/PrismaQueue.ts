@@ -29,6 +29,7 @@ export type PrismaQueueOptions = {
   tableName?: string;
   deleteOn?: "success" | "failure" | "always" | "never";
   alignTimeZone?: boolean;
+  provider?: DatabaseProvider;
 };
 
 export type EnqueueOptions = {
@@ -74,7 +75,7 @@ export class PrismaQueue<
 > extends EventEmitter {
   #prisma: PrismaClient;
   private name: string;
-  private config: Required<Omit<PrismaQueueOptions, "name" | "prisma">>;
+  private config: Required<Omit<PrismaQueueOptions, "name" | "prisma" | "provider">>;
   private provider: DatabaseProvider | null = null;
 
   private concurrency = 0;
@@ -102,6 +103,7 @@ export class PrismaQueue<
       jobInterval = DEFAULT_JOB_INTERVAL,
       deleteOn = DEFAULT_DELETE_ON,
       alignTimeZone = false,
+      provider = null
     } = this.options;
 
     assert(name.length <= 255, "name must be less or equal to 255 chars");
@@ -110,6 +112,7 @@ export class PrismaQueue<
 
     this.name = name;
     this.#prisma = prisma;
+    this.provider = provider;
     this.config = {
       modelName,
       tableName,
@@ -154,6 +157,8 @@ export class PrismaQueue<
     if (!this.provider) {
       this.provider = await databaseProvider(this.#prisma);
       debug(`detected database provider: ${this.provider}`);
+    } else {
+      debug(`using configured database provider: ${this.provider}`);
     }
 
     this.stopped = false;
