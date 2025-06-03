@@ -242,7 +242,7 @@ export class PrismaQueue<
     debug(`schedule`, this.name, options, payloadOrFunction);
     const { key, cron, runAt: firstRunAt, ...otherOptions } = options;
     const runAt = firstRunAt ?? new Cron(cron).nextRun();
-    assert(runAt, `Failed to find a future occurence for given cron`);
+    assert(runAt, `Failed to find a future occurrence for given cron`);
     return this.enqueue(payloadOrFunction, { key, cron, runAt, ...otherOptions });
   }
 
