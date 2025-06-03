@@ -61,6 +61,7 @@ export interface PrismaQueue<T extends JobPayload = JobPayload, U extends JobRes
   ): boolean;
 }
 
+
 const DEFAULT_MAX_CONCURRENCY = 1;
 const DEFAULT_POLL_INTERVAL = 10 * 1000;
 const DEFAULT_JOB_INTERVAL = 50;
@@ -134,9 +135,9 @@ export class PrismaQueue<
   /**
    * Gets the Prisma delegate associated with the queue job model.
    */
-  private get model(): Prisma.QueueJobDelegate {
+  private model(client: Prisma.TransactionClient = this.#prisma): Prisma.QueueJobDelegate {
     const queueJobKey = uncapitalize(this.config.modelName) as "queueJob";
-    return this.#prisma[queueJobKey];
+    return client[queueJobKey];
   }
 
   /**
@@ -148,13 +149,13 @@ export class PrismaQueue<
       debug(`queue named="${this.name}" is already running, skipping...`);
       return;
     }
-    
+
     // Detect database provider once at startup
     if (!this.provider) {
       this.provider = await databaseProvider(this.#prisma);
       debug(`detected database provider: ${this.provider}`);
     }
-    
+
     this.stopped = false;
     return this.poll();
   }
@@ -198,12 +199,12 @@ export class PrismaQueue<
     debug(`enqueue`, this.name, payloadOrFunction, options);
     const { name: queueName, config } = this;
     const { key = null, cron = null, maxAttempts = config.maxAttempts, priority = 0, runAt } = options;
-    const record = await this.#prisma.$transaction(async (client) => {
+    const record = await this.#prisma.$transaction(async (tx) => {
       const payload =
-        payloadOrFunction instanceof Function ? await payloadOrFunction(client) : payloadOrFunction;
+        payloadOrFunction instanceof Function ? await payloadOrFunction(tx) : payloadOrFunction;
       const data = { queue: queueName, cron, payload, maxAttempts, priority, key };
       if (key && runAt) {
-        const { count } = await this.model.deleteMany({
+        const { count } = await this.model(tx).deleteMany({
           where: {
             queue: queueName,
             key,
@@ -217,15 +218,18 @@ export class PrismaQueue<
           debug(`deleted ${count} conflicting upcoming queue jobs`);
         }
         const update = { ...data, ...(runAt ? { runAt } : {}) };
-        return await this.model.upsert({
+        return await this.model(tx).upsert({
           where: { key_runAt: { key, runAt } },
           create: { ...update },
           update,
         });
       }
-      return await this.model.create({ data });
+      return await this.model(tx).create({ data });
     });
-    const job = new PrismaJob(record as DatabaseJob<T, U>, { model: this.model, client: this.#prisma });
+    const job = new PrismaJob(record as DatabaseJob<T, U>, {
+      model: this.model(),
+      client: this.#prisma,
+    });
     this.emit("enqueue", job);
     return job;
   }
@@ -441,7 +445,7 @@ export class PrismaQueue<
     }
 
     // Step 2: Create job instance (processing happens in main dequeue method)
-    return new PrismaJob<T, U>(jobRecord, { model: this.model, client: this.#prisma });
+    return new PrismaJob<T, U>(jobRecord, { model: this.model(), client: this.#prisma });
   }
 
   /**
@@ -524,7 +528,7 @@ export class PrismaQueue<
     }
 
     // Step 2: Create job instance (processing happens in main dequeue method)
-    return new PrismaJob<T, U>(jobRecord, { model: this.model, client: this.#prisma });
+    return new PrismaJob<T, U>(jobRecord, { model: this.model(), client: this.#prisma });
   }
 
   /**
@@ -540,7 +544,7 @@ export class PrismaQueue<
       where.runAt = { lte: date };
       where.AND = { OR: [{ notBefore: { lte: date } }, { notBefore: null }] };
     }
-    return await this.model.count({
+    return await this.model().count({
       where,
     });
   }

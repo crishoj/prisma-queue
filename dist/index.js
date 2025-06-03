@@ -329,9 +329,9 @@ var PrismaQueue = class extends EventEmitter {
   /**
    * Gets the Prisma delegate associated with the queue job model.
    */
-  get model() {
+  model(client = this.#prisma) {
     const queueJobKey = uncapitalize(this.config.modelName);
-    return this.#prisma[queueJobKey];
+    return client[queueJobKey];
   }
   /**
    * Starts the job processing in the queue.
@@ -381,11 +381,11 @@ var PrismaQueue = class extends EventEmitter {
     debug(`enqueue`, this.name, payloadOrFunction, options);
     const { name: queueName, config } = this;
     const { key = null, cron = null, maxAttempts = config.maxAttempts, priority = 0, runAt } = options;
-    const record = await this.#prisma.$transaction(async (client) => {
-      const payload = payloadOrFunction instanceof Function ? await payloadOrFunction(client) : payloadOrFunction;
+    const record = await this.#prisma.$transaction(async (tx) => {
+      const payload = payloadOrFunction instanceof Function ? await payloadOrFunction(tx) : payloadOrFunction;
       const data = { queue: queueName, cron, payload, maxAttempts, priority, key };
       if (key && runAt) {
-        const { count } = await this.model.deleteMany({
+        const { count } = await this.model(tx).deleteMany({
           where: {
             queue: queueName,
             key,
@@ -399,15 +399,18 @@ var PrismaQueue = class extends EventEmitter {
           debug(`deleted ${count} conflicting upcoming queue jobs`);
         }
         const update = { ...data, ...runAt ? { runAt } : {} };
-        return await this.model.upsert({
+        return await this.model(tx).upsert({
           where: { key_runAt: { key, runAt } },
           create: { ...update },
           update
         });
       }
-      return await this.model.create({ data });
+      return await this.model(tx).create({ data });
     });
-    const job = new PrismaJob(record, { model: this.model, client: this.#prisma });
+    const job = new PrismaJob(record, {
+      model: this.model(),
+      client: this.#prisma
+    });
     this.emit("enqueue", job);
     return job;
   }
@@ -420,7 +423,7 @@ var PrismaQueue = class extends EventEmitter {
     debug(`schedule`, this.name, options, payloadOrFunction);
     const { key, cron, runAt: firstRunAt, ...otherOptions } = options;
     const runAt = firstRunAt ?? new Cron(cron).nextRun();
-    assert2(runAt, `Failed to find a future occurence for given cron`);
+    assert2(runAt, `Failed to find a future occurrence for given cron`);
     return this.enqueue(payloadOrFunction, { key, cron, runAt, ...otherOptions });
   }
   /**
@@ -592,7 +595,7 @@ var PrismaQueue = class extends EventEmitter {
     if (!jobRecord) {
       return null;
     }
-    return new PrismaJob(jobRecord, { model: this.model, client: this.#prisma });
+    return new PrismaJob(jobRecord, { model: this.model(), client: this.#prisma });
   }
   /**
    * Dequeues a job using optimistic locking for SQLite (no SKIP LOCKED support).
@@ -661,7 +664,7 @@ var PrismaQueue = class extends EventEmitter {
     if (!jobRecord) {
       return null;
     }
-    return new PrismaJob(jobRecord, { model: this.model, client: this.#prisma });
+    return new PrismaJob(jobRecord, { model: this.model(), client: this.#prisma });
   }
   /**
    * Counts the number of jobs in the queue, optionally only those available for processing.
@@ -676,7 +679,7 @@ var PrismaQueue = class extends EventEmitter {
       where.runAt = { lte: date };
       where.AND = { OR: [{ notBefore: { lte: date } }, { notBefore: null }] };
     }
-    return await this.model.count({
+    return await this.model().count({
       where
     });
   }

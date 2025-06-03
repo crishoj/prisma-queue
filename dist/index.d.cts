@@ -143,7 +143,7 @@ declare class PrismaQueue<T extends JobPayload = JobPayload, U extends JobResult
     /**
      * Gets the Prisma delegate associated with the queue job model.
      */
-    private get model();
+    private model;
     /**
      * Starts the job processing in the queue.
      */
