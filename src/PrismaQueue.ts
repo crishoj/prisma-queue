@@ -14,6 +14,7 @@ import {
   serializeError,
   uncapitalize,
   waitFor,
+  databaseProvider,
 } from "./utils";
 
 export type PrismaQueueOptions = {
@@ -283,6 +284,66 @@ export class PrismaQueue<
   }
 
   /**
+   * Processes a dequeued job by running the worker and handling success/failure.
+   * @param job - The job to process
+   */
+  private async processJob(job: PrismaJob<T, U>): Promise<void> {
+    const { deleteOn } = this.config;
+    const { id, payload, attempts, maxAttempts } = job.record;
+    
+    try {
+      assert(this.worker, "Missing queue worker to process job");
+      debug(`starting worker for job({id: ${id}, payload: ${JSON.stringify(payload)}})`);
+      const result = await this.worker(job, this.#prisma);
+      debug(`finished worker for job({id: ${id}, payload: ${JSON.stringify(payload)}})`);
+      const date = new Date();
+      await job.update({ finishedAt: date, progress: 100, result, error: Prisma.DbNull });
+      this.emit("success", result, job);
+      if (deleteOn === "success" || deleteOn === "always") {
+        await job.delete();
+      }
+    } catch (error) {
+      const date = new Date();
+      debug(
+        `failed finishing job({id: ${id}, payload: ${JSON.stringify(payload)}}) with error="${String(error)}"`,
+      );
+      const isFinished = maxAttempts && attempts >= maxAttempts;
+      const notBefore = new Date(date.getTime() + calculateDelay(attempts));
+      if (!isFinished) {
+        debug(`will retry at notBefore=${notBefore.toISOString()} (attempts=${attempts})`);
+      }
+      await job.update({
+        finishedAt: isFinished ? date : null,
+        failedAt: date,
+        error: serializeError(error),
+        notBefore: isFinished ? null : notBefore,
+      });
+      this.emit("error", error, job);
+      if (deleteOn === "failure" || deleteOn === "always") {
+        await job.delete();
+      }
+    }
+  }
+
+  /**
+   * Handles post-dequeue logic like emitting events and scheduling next cron run.
+   * @param job - The dequeued job
+   */
+  private async handleDequeueResult(job: PrismaJob<T, U> | null): Promise<void> {
+    if (job) {
+      this.emit("dequeue", job);
+      const { key, cron, payload, finishedAt } = job;
+      if (finishedAt && cron && key) {
+        // Schedule next cron
+        debug(
+          `scheduling next cron job({key: ${key}, cron: ${cron}}) with payload=${JSON.stringify(payload)}`,
+        );
+        await this.schedule({ key, cron }, payload);
+      }
+    }
+  }
+
+  /**
    * Dequeues and processes the next job in the queue. Handles locking and error management internally.
    * @returns {Promise<PrismaJob<T, U> | null>} The job that was processed or null if no job was available.
    */
@@ -290,9 +351,33 @@ export class PrismaQueue<
     if (this.stopped) {
       return null;
     }
+
+    const job = await this.dequeueByProvider();
+    await this.handleDequeueResult(job);
+    return job;
+  }
+
+  private async dequeueByProvider(): Promise<PrismaJob<T, U> | null> {
+    const provider = await databaseProvider(this.#prisma);
+
+    switch (provider) {
+      case "postgresql":
+        return await this.dequeueWithSkipLocked();
+      case "sqlite":
+        return await this.dequeueWithOptimisticLocking();
+      default:
+        throw Error(`Unsupported provider:  ${provider}`);
+    }
+  }
+
+  /**
+   * Dequeues using FOR UPDATE SKIP LOCKED (PostgreSQL, MySQL, etc.).
+   * @returns {Promise<PrismaJob<T, U> | null>} The job that was processed or null if no job was available.
+   */
+  private async dequeueWithSkipLocked(): Promise<PrismaJob<T, U> | null> {
     debug(`dequeuing from queue named="${this.name}"...`);
     const { name: queueName } = this;
-    const { tableName: tableNameRaw, deleteOn, alignTimeZone } = this.config;
+    const { tableName: tableNameRaw, alignTimeZone } = this.config;
     const tableName = escape(tableNameRaw);
     const queueJobKey = uncapitalize(this.config.modelName) as "queueJob";
     const job = await this.#prisma.$transaction(
@@ -327,57 +412,91 @@ export class PrismaQueue<
           // @NOTE Failed to acquire a lock
           return null;
         }
-        const { id, payload, attempts, maxAttempts } = rows[0];
         const job = new PrismaJob<T, U>(rows[0], { model: client[queueJobKey], client });
-        let result;
-        try {
-          assert(this.worker, "Missing queue worker to process job");
-          debug(`starting worker for job({id: ${id}, payload: ${JSON.stringify(payload)}})`);
-          result = await this.worker(job, this.#prisma);
-          debug(`finished worker for job({id: ${id}, payload: ${JSON.stringify(payload)}})`);
-          const date = new Date();
-          await job.update({ finishedAt: date, progress: 100, result, error: Prisma.DbNull });
-          this.emit("success", result, job);
-          if (deleteOn === "success" || deleteOn === "always") {
-            await job.delete();
-          }
-        } catch (error) {
-          const date = new Date();
-          debug(
-            `failed finishing job({id: ${id}, payload: ${JSON.stringify(payload)}}) with error="${String(error)}"`,
-          );
-          const isFinished = maxAttempts && attempts >= maxAttempts;
-          const notBefore = new Date(date.getTime() + calculateDelay(attempts));
-          if (!isFinished) {
-            debug(`will retry at notBefore=${notBefore.toISOString()} (attempts=${attempts})`);
-          }
-          await job.update({
-            finishedAt: isFinished ? date : null,
-            failedAt: date,
-            error: serializeError(error),
-            notBefore: isFinished ? null : notBefore,
-          });
-          this.emit("error", error, job);
-          if (deleteOn === "failure" || deleteOn === "always") {
-            await job.delete();
-          }
-        }
+        await this.processJob(job);
         return job;
       },
       // @NOTE https://github.com/prisma/prisma/issues/11565#issuecomment-1031380271
       { timeout: 864e5 },
     );
-    if (job) {
-      this.emit("dequeue", job);
-      const { key, cron, payload, finishedAt } = job;
-      if (finishedAt && cron && key) {
-        // Schedule next cron
-        debug(
-          `scheduling next cron job({key: ${key}, cron: ${cron}}) with payload=${JSON.stringify(payload)}`,
-        );
-        await this.schedule({ key, cron }, payload);
-      }
+
+    return job;
+  }
+
+  /**
+   * Dequeues a job using optimistic locking for SQLite (no SKIP LOCKED support).
+   * @returns {Promise<PrismaJob<T, U> | null>} The job that was processed or null if no job was available.
+   */
+  private async dequeueWithOptimisticLocking(): Promise<PrismaJob<T, U> | null> {
+    if (this.stopped) {
+      return null;
     }
+    debug(`dequeuing from queue named="${this.name}"...`);
+    const { name: queueName } = this;
+    const { alignTimeZone } = this.config;
+    const queueJobKey = uncapitalize(this.config.modelName) as "queueJob";
+
+    const job = await this.#prisma.$transaction(
+      async (client) => {
+        if (alignTimeZone) {
+          debug(`timezone alignment not supported for provider, skipping...`);
+        }
+
+        // Find the next available job without locking
+        const availableJob = await client[queueJobKey].findFirst({
+          where: {
+            queue: queueName,
+            finishedAt: null,
+            runAt: { lte: new Date() },
+            OR: [
+              { notBefore: null },
+              { notBefore: { lte: new Date() } }
+            ]
+          },
+          orderBy: [
+            { priority: 'asc' },
+            { runAt: 'asc' }
+          ]
+        });
+
+        if (!availableJob) {
+          debug(`no jobs found in SQLite queue named="${this.name}"`);
+          return null;
+        }
+
+        // Optimistic locking: try to update the job if it hasn't been processed
+        const updatedJob = await client[queueJobKey].updateMany({
+          where: {
+            id: availableJob.id,
+            processedAt: null // Only update if not already being processed
+          },
+          data: {
+            processedAt: new Date(),
+            attempts: { increment: 1 }
+          }
+        });
+
+        if (updatedJob.count === 0) {
+          debug(`job ${availableJob.id} was already claimed by another worker`);
+          return null;
+        }
+
+        // Fetch the updated job
+        const jobRecord = await client[queueJobKey].findUnique({
+          where: { id: availableJob.id }
+        });
+
+        if (!jobRecord) {
+          debug(`job ${availableJob.id} not found after update`);
+          return null;
+        }
+
+        const job = new PrismaJob<T, U>(jobRecord as DatabaseJob<T, U>, { model: client[queueJobKey], client });
+        await this.processJob(job);
+        return job;
+      },
+      { timeout: 864e5 },
+    );
 
     return job;
   }
