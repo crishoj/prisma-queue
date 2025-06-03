@@ -538,19 +538,13 @@ var PrismaQueue = class extends import_events.EventEmitter {
     }
   }
   /**
-   * Handles post-dequeue logic like emitting events and scheduling next cron run.
-   * @param job - The dequeued job
+   * Handles scheduling next cron run.
    */
-  async handleDequeueResult(job) {
-    if (job) {
-      this.emit("dequeue", job);
-      const { key, cron, payload, finishedAt } = job;
-      if (finishedAt && cron && key) {
-        debug(
-          `scheduling next cron job({key: ${key}, cron: ${cron}}) with payload=${JSON.stringify(payload)}`
-        );
-        await this.schedule({ key, cron }, payload);
-      }
+  async scheduleNextCronRun(job) {
+    const { key, cron, payload, finishedAt } = job;
+    if (finishedAt && cron && key) {
+      debug(`scheduling next cron job({key: ${key}, cron: ${cron}}) with payload=${JSON.stringify(payload)}`);
+      await this.schedule({ key, cron }, payload);
     }
   }
   /**
@@ -562,7 +556,11 @@ var PrismaQueue = class extends import_events.EventEmitter {
       return null;
     }
     const job = await this.dequeueByProvider();
-    await this.handleDequeueResult(job);
+    if (job) {
+      this.emit("dequeue", job);
+      await this.processJob(job);
+      await this.scheduleNextCronRun(job);
+    }
     return job;
   }
   async dequeueByProvider() {
@@ -578,15 +576,14 @@ var PrismaQueue = class extends import_events.EventEmitter {
   }
   /**
    * Dequeues using FOR UPDATE SKIP LOCKED (PostgreSQL, MySQL, etc.).
-   * @returns {Promise<PrismaJob<T, U> | null>} The job that was processed or null if no job was available.
+   * @returns {Promise<PrismaJob<T, U> | null>} The acquired job or null if no job was available.
    */
   async dequeueWithSkipLocked() {
     debug(`dequeuing from queue named="${this.name}"...`);
     const { name: queueName } = this;
     const { tableName: tableNameRaw, alignTimeZone } = this.config;
     const tableName = escape(tableNameRaw);
-    const queueJobKey = uncapitalize(this.config.modelName);
-    const job = await this.#prisma.$transaction(
+    const jobRecord = await this.#prisma.$transaction(
       async (client) => {
         if (alignTimeZone) {
           const [{ TimeZone: dbTimeZone }] = await client.$queryRawUnsafe("SHOW TIME ZONE");
@@ -616,18 +613,20 @@ var PrismaQueue = class extends import_events.EventEmitter {
           debug(`no jobs found in queue named="${this.name}"`);
           return null;
         }
-        const job2 = new PrismaJob(rows[0], { model: client[queueJobKey], client });
-        await this.processJob(job2);
-        return job2;
+        return rows[0];
       },
-      // @NOTE https://github.com/prisma/prisma/issues/11565#issuecomment-1031380271
-      { timeout: 864e5 }
+      // Short timeout for job acquisition only
+      { timeout: 3e4 }
+      // 30 seconds
     );
-    return job;
+    if (!jobRecord) {
+      return null;
+    }
+    return new PrismaJob(jobRecord, { model: this.model, client: this.#prisma });
   }
   /**
    * Dequeues a job using optimistic locking for SQLite (no SKIP LOCKED support).
-   * @returns {Promise<PrismaJob<T, U> | null>} The job that was processed or null if no job was available.
+   * @returns {Promise<PrismaJob<T, U> | null>} The acquired job or null if no job was available.
    */
   async dequeueWithOptimisticLocking() {
     if (this.stopped) {
@@ -637,7 +636,7 @@ var PrismaQueue = class extends import_events.EventEmitter {
     const { name: queueName } = this;
     const { alignTimeZone } = this.config;
     const queueJobKey = uncapitalize(this.config.modelName);
-    const job = await this.#prisma.$transaction(
+    const jobRecord = await this.#prisma.$transaction(
       async (client) => {
         if (alignTimeZone) {
           debug(`timezone alignment not supported for provider, skipping...`);
@@ -658,7 +657,7 @@ var PrismaQueue = class extends import_events.EventEmitter {
           ]
         });
         if (!availableJob) {
-          debug(`no jobs found in SQLite queue named="${this.name}"`);
+          debug(`no jobs found in queue named="${this.name}"`);
           return null;
         }
         const updatedJob = await client[queueJobKey].updateMany({
@@ -676,20 +675,23 @@ var PrismaQueue = class extends import_events.EventEmitter {
           debug(`job ${availableJob.id} was already claimed by another worker`);
           return null;
         }
-        const jobRecord = await client[queueJobKey].findUnique({
+        const jobRecord2 = await client[queueJobKey].findUnique({
           where: { id: availableJob.id }
         });
-        if (!jobRecord) {
+        if (!jobRecord2) {
           debug(`job ${availableJob.id} not found after update`);
           return null;
         }
-        const job2 = new PrismaJob(jobRecord, { model: client[queueJobKey], client });
-        await this.processJob(job2);
-        return job2;
+        return jobRecord2;
       },
-      { timeout: 864e5 }
+      // Short timeout for job acquisition only
+      { timeout: 3e4 }
+      // 30 seconds
     );
-    return job;
+    if (!jobRecord) {
+      return null;
+    }
+    return new PrismaJob(jobRecord, { model: this.model, client: this.#prisma });
   }
   /**
    * Counts the number of jobs in the queue, optionally only those available for processing.

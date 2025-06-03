@@ -173,10 +173,9 @@ declare class PrismaQueue<T extends JobPayload = JobPayload, U extends JobResult
      */
     private processJob;
     /**
-     * Handles post-dequeue logic like emitting events and scheduling next cron run.
-     * @param job - The dequeued job
+     * Handles scheduling next cron run.
      */
-    private handleDequeueResult;
+    private scheduleNextCronRun;
     /**
      * Dequeues and processes the next job in the queue. Handles locking and error management internally.
      * @returns {Promise<PrismaJob<T, U> | null>} The job that was processed or null if no job was available.
@@ -185,12 +184,12 @@ declare class PrismaQueue<T extends JobPayload = JobPayload, U extends JobResult
     private dequeueByProvider;
     /**
      * Dequeues using FOR UPDATE SKIP LOCKED (PostgreSQL, MySQL, etc.).
-     * @returns {Promise<PrismaJob<T, U> | null>} The job that was processed or null if no job was available.
+     * @returns {Promise<PrismaJob<T, U> | null>} The acquired job or null if no job was available.
      */
     private dequeueWithSkipLocked;
     /**
      * Dequeues a job using optimistic locking for SQLite (no SKIP LOCKED support).
-     * @returns {Promise<PrismaJob<T, U> | null>} The job that was processed or null if no job was available.
+     * @returns {Promise<PrismaJob<T, U> | null>} The acquired job or null if no job was available.
      */
     private dequeueWithOptimisticLocking;
     /**

@@ -7,14 +7,14 @@ import { PrismaJob } from "./PrismaJob";
 import type { DatabaseJob, JobCreator, JobPayload, JobResult, JobWorker } from "./types";
 import {
   calculateDelay,
+  databaseProvider,
   debug,
   escape,
   getCurrentTimeZone,
   getTableName,
   serializeError,
   uncapitalize,
-  waitFor,
-  databaseProvider,
+  waitFor
 } from "./utils";
 
 export type PrismaQueueOptions = {
@@ -326,20 +326,14 @@ export class PrismaQueue<
   }
 
   /**
-   * Handles post-dequeue logic like emitting events and scheduling next cron run.
-   * @param job - The dequeued job
+   * Handles scheduling next cron run.
    */
-  private async handleDequeueResult(job: PrismaJob<T, U> | null): Promise<void> {
-    if (job) {
-      this.emit("dequeue", job);
-      const { key, cron, payload, finishedAt } = job;
-      if (finishedAt && cron && key) {
-        // Schedule next cron
-        debug(
-          `scheduling next cron job({key: ${key}, cron: ${cron}}) with payload=${JSON.stringify(payload)}`,
-        );
-        await this.schedule({ key, cron }, payload);
-      }
+  private async scheduleNextCronRun(job: PrismaJob<T, U>): Promise<void> {
+    const { key, cron, payload, finishedAt } = job;
+    if (finishedAt && cron && key) {
+      // Schedule next cron
+      debug(`scheduling next cron job({key: ${key}, cron: ${cron}}) with payload=${JSON.stringify(payload)}`);
+      await this.schedule({ key, cron }, payload);
     }
   }
 
@@ -353,7 +347,11 @@ export class PrismaQueue<
     }
 
     const job = await this.dequeueByProvider();
-    await this.handleDequeueResult(job);
+    if (job) {
+      this.emit("dequeue", job);
+      await this.processJob(job);
+      await this.scheduleNextCronRun(job);
+    }
     return job;
   }
 
@@ -372,15 +370,16 @@ export class PrismaQueue<
 
   /**
    * Dequeues using FOR UPDATE SKIP LOCKED (PostgreSQL, MySQL, etc.).
-   * @returns {Promise<PrismaJob<T, U> | null>} The job that was processed or null if no job was available.
+   * @returns {Promise<PrismaJob<T, U> | null>} The acquired job or null if no job was available.
    */
   private async dequeueWithSkipLocked(): Promise<PrismaJob<T, U> | null> {
     debug(`dequeuing from queue named="${this.name}"...`);
     const { name: queueName } = this;
     const { tableName: tableNameRaw, alignTimeZone } = this.config;
     const tableName = escape(tableNameRaw);
-    const queueJobKey = uncapitalize(this.config.modelName) as "queueJob";
-    const job = await this.#prisma.$transaction(
+    
+    // Step 1: Acquire job in short transaction
+    const jobRecord = await this.#prisma.$transaction(
       async (client) => {
         if (alignTimeZone) {
           const [{ TimeZone: dbTimeZone }] =
@@ -412,20 +411,23 @@ export class PrismaQueue<
           // @NOTE Failed to acquire a lock
           return null;
         }
-        const job = new PrismaJob<T, U>(rows[0], { model: client[queueJobKey], client });
-        await this.processJob(job);
-        return job;
+        return rows[0];
       },
-      // @NOTE https://github.com/prisma/prisma/issues/11565#issuecomment-1031380271
-      { timeout: 864e5 },
+      // Short timeout for job acquisition only
+      { timeout: 30000 }, // 30 seconds
     );
 
-    return job;
+    if (!jobRecord) {
+      return null;
+    }
+
+    // Step 2: Create job instance (processing happens in main dequeue method)
+    return new PrismaJob<T, U>(jobRecord, { model: this.model, client: this.#prisma });
   }
 
   /**
    * Dequeues a job using optimistic locking for SQLite (no SKIP LOCKED support).
-   * @returns {Promise<PrismaJob<T, U> | null>} The job that was processed or null if no job was available.
+   * @returns {Promise<PrismaJob<T, U> | null>} The acquired job or null if no job was available.
    */
   private async dequeueWithOptimisticLocking(): Promise<PrismaJob<T, U> | null> {
     if (this.stopped) {
@@ -436,7 +438,8 @@ export class PrismaQueue<
     const { alignTimeZone } = this.config;
     const queueJobKey = uncapitalize(this.config.modelName) as "queueJob";
 
-    const job = await this.#prisma.$transaction(
+    // Step 1: Acquire job in short transaction
+    const jobRecord = await this.#prisma.$transaction(
       async (client) => {
         if (alignTimeZone) {
           debug(`timezone alignment not supported for provider, skipping...`);
@@ -460,7 +463,7 @@ export class PrismaQueue<
         });
 
         if (!availableJob) {
-          debug(`no jobs found in SQLite queue named="${this.name}"`);
+          debug(`no jobs found in queue named="${this.name}"`);
           return null;
         }
 
@@ -491,14 +494,18 @@ export class PrismaQueue<
           return null;
         }
 
-        const job = new PrismaJob<T, U>(jobRecord as DatabaseJob<T, U>, { model: client[queueJobKey], client });
-        await this.processJob(job);
-        return job;
+        return jobRecord as DatabaseJob<T, U>;
       },
-      { timeout: 864e5 },
+      // Short timeout for job acquisition only
+      { timeout: 30000 }, // 30 seconds
     );
 
-    return job;
+    if (!jobRecord) {
+      return null;
+    }
+
+    // Step 2: Create job instance (processing happens in main dequeue method)
+    return new PrismaJob<T, U>(jobRecord, { model: this.model, client: this.#prisma });
   }
 
   /**
