@@ -1,7 +1,7 @@
 // src/PrismaQueue.ts
 import { Cron } from "croner";
 import { EventEmitter } from "events";
-import assert2 from "node:assert";
+import assert from "node:assert";
 
 // src/utils/debug.ts
 import createDebug from "debug";
@@ -55,15 +55,6 @@ var serializeError = (err) => {
 };
 var isPrismaError = (error) => {
   return error instanceof Error && "code" in error;
-};
-
-// src/utils/prisma.ts
-import { Prisma } from "@prisma/client";
-import assert from "assert";
-var getTableName = (modelName) => {
-  const model = Prisma.dmmf.datamodel.models.find((model2) => model2.name === modelName);
-  assert(model?.dbName, `Did not find model=${modelName} in Prisma.dmmf!`);
-  return model.dbName;
 };
 
 // src/utils/string.ts
@@ -289,7 +280,7 @@ var PrismaQueue = class extends EventEmitter {
       prisma,
       name = "default",
       modelName = "QueueJob",
-      tableName = getTableName(modelName),
+      tableName = "QueueJob",
       maxAttempts = null,
       maxConcurrency = DEFAULT_MAX_CONCURRENCY,
       pollInterval = DEFAULT_POLL_INTERVAL,
@@ -298,9 +289,9 @@ var PrismaQueue = class extends EventEmitter {
       alignTimeZone = false,
       provider = null
     } = this.options;
-    assert2(name.length <= 255, "name must be less or equal to 255 chars");
-    assert2(pollInterval >= 100, "pollInterval must be more than 100 ms");
-    assert2(jobInterval >= 10, "jobInterval must be more than 10 ms");
+    assert(name.length <= 255, "name must be less or equal to 255 chars");
+    assert(pollInterval >= 100, "pollInterval must be more than 100 ms");
+    assert(jobInterval >= 10, "jobInterval must be more than 10 ms");
     this.name = name;
     this.#prisma = prisma;
     this.provider = provider;
@@ -429,7 +420,7 @@ var PrismaQueue = class extends EventEmitter {
     debug(`schedule`, this.name, options, payloadOrFunction);
     const { key, cron, runAt: firstRunAt, ...otherOptions } = options;
     const runAt = firstRunAt ?? new Cron(cron).nextRun();
-    assert2(runAt, `Failed to find a future occurrence for given cron`);
+    assert(runAt, `Failed to find a future occurrence for given cron`);
     return this.enqueue(payloadOrFunction, { key, cron, runAt, ...otherOptions });
   }
   /**
@@ -482,7 +473,7 @@ var PrismaQueue = class extends EventEmitter {
     const { deleteOn } = this.config;
     const { id, payload, attempts, maxAttempts } = job.record;
     try {
-      assert2(this.worker, "Missing queue worker to process job");
+      assert(this.worker, "Missing queue worker to process job");
       debug(`starting worker for job({id: ${id}, payload: ${JSON.stringify(payload)}})`);
       const result = await this.worker(job, this.#prisma);
       debug(`finished worker for job({id: ${id}, payload: ${JSON.stringify(payload)}})`);

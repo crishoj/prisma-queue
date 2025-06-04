@@ -97,15 +97,6 @@ var isPrismaError = (error) => {
   return error instanceof Error && "code" in error;
 };
 
-// src/utils/prisma.ts
-var import_client = require("@prisma/client");
-var import_assert = __toESM(require("assert"), 1);
-var getTableName = (modelName) => {
-  const model = import_client.Prisma.dmmf.datamodel.models.find((model2) => model2.name === modelName);
-  (0, import_assert.default)(model?.dbName, `Did not find model=${modelName} in Prisma.dmmf!`);
-  return model.dbName;
-};
-
 // src/utils/string.ts
 var escape = (name) => '"' + name.replace(/"/g, '""') + '"';
 var uncapitalize = (string) => string.charAt(0).toLowerCase() + string.slice(1);
@@ -329,7 +320,7 @@ var PrismaQueue = class extends import_events.EventEmitter {
       prisma,
       name = "default",
       modelName = "QueueJob",
-      tableName = getTableName(modelName),
+      tableName = "QueueJob",
       maxAttempts = null,
       maxConcurrency = DEFAULT_MAX_CONCURRENCY,
       pollInterval = DEFAULT_POLL_INTERVAL,

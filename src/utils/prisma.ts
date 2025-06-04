@@ -1,8 +1,0 @@
-import { Prisma } from "@prisma/client";
-import assert from "assert";
-
-export const getTableName = (modelName: string): string => {
-  const model = Prisma.dmmf.datamodel.models.find((model) => model.name === modelName);
-  assert(model?.dbName, `Did not find model=${modelName} in Prisma.dmmf!`);
-  return model.dbName;
-};
