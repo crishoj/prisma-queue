@@ -1,4 +1,4 @@
-import { Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 
 export const serializeError = (err: unknown) => {
   if (err instanceof Error) {
