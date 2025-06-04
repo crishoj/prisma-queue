@@ -161,6 +161,10 @@ export class PrismaQueue<
       debug(`using configured database provider: ${this.provider}`);
     }
 
+    if (this.provider === "sqlite") {
+      await this.clearStaleLocks();
+    }
+
     this.stopped = false;
     return this.poll();
   }
@@ -552,5 +556,16 @@ export class PrismaQueue<
     return await this.model().count({
       where,
     });
+  }
+
+  /**
+   * Clear stale optimistic locks (`processedAt`)
+   * @private
+   */
+  private async clearStaleLocks() {
+    await this.model().updateMany({
+      where: { processedAt: { not: null }, finishedAt: null },
+      data: { processedAt: null },
+    })
   }
 }
