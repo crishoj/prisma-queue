@@ -210,6 +210,11 @@ declare class PrismaQueue<T extends JobPayload = JobPayload, U extends JobResult
      * @returns {Promise<number>} The number of jobs.
      */
     size(onlyAvailable?: boolean): Promise<number>;
+    /**
+     * Clear stale optimistic locks (`processedAt`)
+     * @private
+     */
+    private clearStaleLocks;
 }
 
 /**
