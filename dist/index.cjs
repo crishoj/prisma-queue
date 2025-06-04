@@ -39,7 +39,6 @@ __export(src_exports, {
 module.exports = __toCommonJS(src_exports);
 
 // src/PrismaQueue.ts
-var import_client2 = require("@prisma/client");
 var import_croner = require("croner");
 var import_events = require("events");
 var import_node_assert = __toESM(require("assert"), 1);
@@ -322,12 +321,12 @@ var PrismaQueue = class extends import_events.EventEmitter {
    * @param options - Configuration options for the queue.
    * @param worker - The worker function that processes jobs.
    */
-  constructor(options = {}, worker) {
+  constructor(options, worker) {
     super();
     this.options = options;
     this.worker = worker;
     const {
-      prisma = new import_client2.PrismaClient(),
+      prisma,
       name = "default",
       modelName = "QueueJob",
       tableName = getTableName(modelName),
@@ -528,7 +527,7 @@ var PrismaQueue = class extends import_events.EventEmitter {
       const result = await this.worker(job, this.#prisma);
       debug(`finished worker for job({id: ${id}, payload: ${JSON.stringify(payload)}})`);
       const date = /* @__PURE__ */ new Date();
-      await job.update({ finishedAt: date, progress: 100, result, error: import_client2.Prisma.DbNull });
+      await job.update({ finishedAt: date, progress: 100, result, error: {} });
       this.emit("success", result, job);
       if (deleteOn === "success" || deleteOn === "always") {
         await job.delete();

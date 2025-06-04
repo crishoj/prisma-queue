@@ -92,7 +92,7 @@ declare function prepareForJson<T>(originalValue: T): InputJsonValue;
 declare function restoreFromJson<T = unknown>(preparedValue: InputJsonValue): T;
 
 type PrismaQueueOptions = {
-    prisma?: PrismaClient;
+    prisma: PrismaClient;
     name?: string;
     maxAttempts?: number | null;
     maxConcurrency?: number;
@@ -140,7 +140,7 @@ declare class PrismaQueue<T extends JobPayload = JobPayload, U extends JobResult
      * @param options - Configuration options for the queue.
      * @param worker - The worker function that processes jobs.
      */
-    constructor(options: PrismaQueueOptions | undefined, worker: JobWorker<T, U>);
+    constructor(options: PrismaQueueOptions, worker: JobWorker<T, U>);
     /**
      * Gets the Prisma delegate associated with the queue job model.
      */

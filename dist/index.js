@@ -1,5 +1,4 @@
 // src/PrismaQueue.ts
-import { Prisma as Prisma2, PrismaClient } from "@prisma/client";
 import { Cron } from "croner";
 import { EventEmitter } from "events";
 import assert2 from "node:assert";
@@ -282,12 +281,12 @@ var PrismaQueue = class extends EventEmitter {
    * @param options - Configuration options for the queue.
    * @param worker - The worker function that processes jobs.
    */
-  constructor(options = {}, worker) {
+  constructor(options, worker) {
     super();
     this.options = options;
     this.worker = worker;
     const {
-      prisma = new PrismaClient(),
+      prisma,
       name = "default",
       modelName = "QueueJob",
       tableName = getTableName(modelName),
@@ -488,7 +487,7 @@ var PrismaQueue = class extends EventEmitter {
       const result = await this.worker(job, this.#prisma);
       debug(`finished worker for job({id: ${id}, payload: ${JSON.stringify(payload)}})`);
       const date = /* @__PURE__ */ new Date();
-      await job.update({ finishedAt: date, progress: 100, result, error: Prisma2.DbNull });
+      await job.update({ finishedAt: date, progress: 100, result, error: {} });
       this.emit("success", result, job);
       if (deleteOn === "success" || deleteOn === "always") {
         await job.delete();
