@@ -19,7 +19,7 @@ import {
 } from "./utils";
 
 export type PrismaQueueOptions = {
-  prisma?: PrismaClient;
+  prisma: PrismaClient;
   name?: string;
   maxAttempts?: number | null;
   maxConcurrency?: number;
@@ -87,13 +87,13 @@ export class PrismaQueue<
    * @param worker - The worker function that processes jobs.
    */
   public constructor(
-    private options: PrismaQueueOptions = {},
+    private options: PrismaQueueOptions,
     public worker: JobWorker<T, U>,
   ) {
     super();
 
     const {
-      prisma = new PrismaClient(),
+      prisma,
       name = "default",
       modelName = "QueueJob",
       tableName = getTableName(modelName),
