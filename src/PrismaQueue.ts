@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-unnecessary-condition */
-import { Prisma, PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import { Cron } from "croner";
 import { EventEmitter } from "events";
 import assert from "node:assert";
@@ -62,7 +62,6 @@ export interface PrismaQueue<T extends JobPayload = JobPayload, U extends JobRes
   ): boolean;
 }
 
-
 const DEFAULT_MAX_CONCURRENCY = 1;
 const DEFAULT_POLL_INTERVAL = 10 * 1000;
 const DEFAULT_JOB_INTERVAL = 50;
@@ -103,7 +102,7 @@ export class PrismaQueue<
       jobInterval = DEFAULT_JOB_INTERVAL,
       deleteOn = DEFAULT_DELETE_ON,
       alignTimeZone = false,
-      provider = null
+      provider = null,
     } = this.options;
 
     assert(name.length <= 255, "name must be less or equal to 255 chars");
@@ -209,8 +208,7 @@ export class PrismaQueue<
     const { name: queueName, config } = this;
     const { key = null, cron = null, maxAttempts = config.maxAttempts, priority = 0, runAt } = options;
     const record = await this.#prisma.$transaction(async (tx) => {
-      const payload =
-        payloadOrFunction instanceof Function ? await payloadOrFunction(tx) : payloadOrFunction;
+      const payload = payloadOrFunction instanceof Function ? await payloadOrFunction(tx) : payloadOrFunction;
       const data = { queue: queueName, cron, payload, maxAttempts, priority, key };
       if (key && runAt) {
         const { count } = await this.model(tx).deleteMany({
@@ -320,14 +318,14 @@ export class PrismaQueue<
   private async processJob(job: PrismaJob<T, U>): Promise<void> {
     const { deleteOn } = this.config;
     const { id, payload, attempts, maxAttempts } = job.record;
-    
+
     try {
       assert(this.worker, "Missing queue worker to process job");
       debug(`starting worker for job({id: ${id}, payload: ${JSON.stringify(payload)}})`);
       const result = await this.worker(job, this.#prisma);
       debug(`finished worker for job({id: ${id}, payload: ${JSON.stringify(payload)}})`);
       const date = new Date();
-      await job.update({ finishedAt: date, progress: 100, result, error: Prisma.DbNull });
+      await job.update({ finishedAt: date, progress: 100, result, error: {} });
       this.emit("success", result, job);
       if (deleteOn === "success" || deleteOn === "always") {
         await job.delete();
@@ -409,7 +407,7 @@ export class PrismaQueue<
     const { name: queueName } = this;
     const { tableName: tableNameRaw, alignTimeZone } = this.config;
     const tableName = escape(tableNameRaw);
-    
+
     // Step 1: Acquire job in short transaction
     const jobRecord = await this.#prisma.$transaction(
       async (client) => {
@@ -518,7 +516,7 @@ export class PrismaQueue<
 
         // Fetch the updated job
         const jobRecord = await client[queueJobKey].findUnique({
-          where: { id: availableJob.id }
+          where: { id: availableJob.id },
         });
 
         if (!jobRecord) {
