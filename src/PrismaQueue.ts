@@ -563,9 +563,14 @@ export class PrismaQueue<
    * @private
    */
   private async clearStaleLocks() {
-    await this.model().updateMany({
-      where: { processedAt: { not: null }, finishedAt: null },
+    const { count } = await this.model().updateMany({
+      where: {
+        queue: this.name,
+        processedAt: { not: null },
+        finishedAt: null,
+      },
       data: { processedAt: null },
-    })
+    });
+    debug(`${count} stale locks cleared in queue ${this.name}`);
   }
 }
