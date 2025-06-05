@@ -340,9 +340,6 @@ var PrismaQueue = class extends EventEmitter {
     } else {
       debug(`using configured database provider: ${this.provider}`);
     }
-    if (this.provider === "sqlite") {
-      await this.clearStaleLocks();
-    }
     this.stopped = false;
     return this.poll();
   }
@@ -680,22 +677,6 @@ var PrismaQueue = class extends EventEmitter {
     return await this.model().count({
       where
     });
-  }
-  /**
-   * Clear stale optimistic locks (`processedAt`)
-   * @private
-   */
-  async clearStaleLocks() {
-    debug(`clearing stale locks in queue ${this.name}`);
-    const { count } = await this.model().updateMany({
-      where: {
-        queue: this.name,
-        processedAt: { not: null },
-        finishedAt: null
-      },
-      data: { processedAt: null }
-    });
-    debug(`${count} stale locks cleared in queue ${this.name}`);
   }
 };
 
