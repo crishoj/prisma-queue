@@ -611,14 +611,15 @@ var PrismaQueue = class extends EventEmitter {
         if (alignTimeZone) {
           debug(`timezone alignment not supported for provider, skipping...`);
         }
+        const now = /* @__PURE__ */ new Date();
         const availableJob = await client[queueJobKey].findFirst({
           where: {
             queue: queueName,
             finishedAt: null,
-            runAt: { lte: /* @__PURE__ */ new Date() },
+            runAt: { lte: now },
             OR: [
               { notBefore: null },
-              { notBefore: { lte: /* @__PURE__ */ new Date() } }
+              { notBefore: { lte: now } }
             ]
           },
           orderBy: [
@@ -633,11 +634,11 @@ var PrismaQueue = class extends EventEmitter {
         const updatedJob = await client[queueJobKey].updateMany({
           where: {
             id: availableJob.id,
-            processedAt: null
-            // Only update if not already being processed
+            processedAt: availableJob.processedAt
+            // Must match the exact state we found
           },
           data: {
-            processedAt: /* @__PURE__ */ new Date(),
+            processedAt: now,
             attempts: { increment: 1 }
           }
         });
