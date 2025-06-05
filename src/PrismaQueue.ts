@@ -475,20 +475,21 @@ export class PrismaQueue<
         }
 
         // Find the next available job without locking
+        const now = new Date();
         const availableJob = await client[queueJobKey].findFirst({
           where: {
             queue: queueName,
             finishedAt: null,
-            runAt: { lte: new Date() },
+            runAt: { lte: now },
             OR: [
               { notBefore: null },
-              { notBefore: { lte: new Date() } }
-            ]
+              { notBefore: { lte: now } },
+            ],
           },
           orderBy: [
-            { priority: 'asc' },
-            { runAt: 'asc' }
-          ]
+            { priority: "asc" },
+            { runAt: "asc" },
+          ],
         });
 
         if (!availableJob) {
@@ -496,16 +497,16 @@ export class PrismaQueue<
           return null;
         }
 
-        // Optimistic locking: try to update the job if it hasn't been processed
+        // Optimistic locking: try to update the job if it's in the same state we found it
         const updatedJob = await client[queueJobKey].updateMany({
           where: {
             id: availableJob.id,
-            processedAt: null // Only update if not already being processed
+            processedAt: availableJob.processedAt, // Must match the exact state we found
           },
           data: {
-            processedAt: new Date(),
-            attempts: { increment: 1 }
-          }
+            processedAt: now,
+            attempts: { increment: 1 },
+          },
         });
 
         if (updatedJob.count === 0) {
