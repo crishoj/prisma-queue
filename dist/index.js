@@ -567,6 +567,7 @@ var PrismaQueue = class extends EventEmitter {
              FROM ${tableName}
              WHERE (${tableName}."queue" = $1)
                AND (${tableName}."finishedAt" IS NULL)
+               AND (${tableName}."cancelledAt" IS NULL)
                AND (${tableName}."runAt" < NOW())
                AND (${tableName}."notBefore" IS NULL OR ${tableName}."notBefore" < NOW())
              ORDER BY ${tableName}."priority" ASC, ${tableName}."runAt" ASC
@@ -613,6 +614,7 @@ var PrismaQueue = class extends EventEmitter {
           where: {
             queue: queueName,
             finishedAt: null,
+            cancelledAt: null,
             runAt: { lte: now },
             OR: [
               { notBefore: null },
@@ -669,7 +671,7 @@ var PrismaQueue = class extends EventEmitter {
   async size(onlyAvailable) {
     const { name: queueName } = this;
     const date = /* @__PURE__ */ new Date();
-    const where = { queue: queueName, finishedAt: null };
+    const where = { queue: queueName, finishedAt: null, cancelledAt: null };
     if (onlyAvailable) {
       where.runAt = { lte: date };
       where.AND = { OR: [{ notBefore: { lte: date } }, { notBefore: null }] };

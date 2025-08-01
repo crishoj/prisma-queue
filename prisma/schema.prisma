@@ -28,10 +28,12 @@ model QueueJob {
   finishedAt  DateTime?
   processedAt DateTime?
   failedAt    DateTime?
+  cancelledAt DateTime?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
   @@unique([key, runAt])
   @@index([queue, priority, runAt, finishedAt])
+  @@index([queue, finishedAt, cancelledAt, runAt])
   @@map("queue_jobs")
 }
