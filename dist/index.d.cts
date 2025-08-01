@@ -75,6 +75,11 @@ declare class PrismaJob<T, U> {
      */
     update(data: Prisma.QueueJobUpdateInput): Promise<DatabaseJob<T, U>>;
     /**
+     * Cancels the job by setting the cancelledAt timestamp.
+     * Can only cancel jobs that haven't finished yet.
+     */
+    cancel(): Promise<DatabaseJob<T, U>>;
+    /**
      * Deletes the job from the database.
      */
     delete(): Promise<DatabaseJob<T, U>>;
@@ -120,6 +125,7 @@ type PrismaQueueEvents<T extends JobPayload = JobPayload, U extends JobResult = 
     dequeue: (job: PrismaJob<T, U>) => void;
     success: (result: U, job: PrismaJob<T, U>) => void;
     error: (error: unknown, job?: PrismaJob<T, U>) => void;
+    cancel: (job: PrismaJob<T, U>) => void;
 };
 interface PrismaQueue<T extends JobPayload = JobPayload, U extends JobResult = JobResult> {
     on<E extends keyof PrismaQueueEvents<T, U>>(event: E, listener: PrismaQueueEvents<T, U>[E]): this;
@@ -210,6 +216,13 @@ declare class PrismaQueue<T extends JobPayload = JobPayload, U extends JobResult
      * @returns {Promise<number>} The number of jobs.
      */
     size(onlyAvailable?: boolean): Promise<number>;
+    /**
+     * Cancels a job by ID.
+     * @param {number | bigint} id - The ID of the job to cancel.
+     * @returns {Promise<PrismaJob<T, U>>} The cancelled job.
+     * @throws {Error} If the job is not found or cannot be cancelled.
+     */
+    cancel(id: number | bigint): Promise<PrismaJob<T, U>>;
 }
 
 /**

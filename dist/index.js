@@ -233,6 +233,21 @@ var PrismaJob = class {
     return record;
   }
   /**
+   * Cancels the job by setting the cancelledAt timestamp.
+   * Can only cancel jobs that haven't finished yet.
+   */
+  async cancel() {
+    const current = await this.fetch();
+    if (current.finishedAt || current.cancelledAt) {
+      throw new Error("Job cannot be cancelled - it has already finished or been cancelled");
+    }
+    return await this.update({
+      cancelledAt: /* @__PURE__ */ new Date(),
+      notBefore: null
+      // Clear any retry schedule
+    });
+  }
+  /**
    * Deletes the job from the database.
    */
   async delete() {
@@ -679,6 +694,35 @@ var PrismaQueue = class extends EventEmitter {
     return await this.model().count({
       where
     });
+  }
+  /**
+   * Cancels a job by ID.
+   * @param {number | bigint} id - The ID of the job to cancel.
+   * @returns {Promise<PrismaJob<T, U>>} The cancelled job.
+   * @throws {Error} If the job is not found or cannot be cancelled.
+   */
+  async cancel(id) {
+    const record = await this.model().findUnique({ where: { id } });
+    if (!record) {
+      throw new Error(`Job with id ${id} not found`);
+    }
+    if (record.finishedAt || record.cancelledAt) {
+      throw new Error("Job cannot be cancelled - it has already finished or been cancelled");
+    }
+    const updatedRecord = await this.model().update({
+      where: { id },
+      data: {
+        cancelledAt: /* @__PURE__ */ new Date(),
+        notBefore: null
+        // Clear any retry schedule
+      }
+    });
+    const job = new PrismaJob(updatedRecord, {
+      model: this.model(),
+      client: this.#prisma
+    });
+    this.emit("cancel", job);
+    return job;
   }
 };
 

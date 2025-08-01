@@ -123,6 +123,24 @@ export class PrismaJob<T, U> {
   }
 
   /**
+   * Cancels the job by setting the cancelledAt timestamp.
+   * Can only cancel jobs that haven't finished yet.
+   */
+  public async cancel(): Promise<DatabaseJob<T, U>> {
+    // Fetch current state to check if cancellable
+    const current = await this.fetch();
+    
+    if (current.finishedAt || current.cancelledAt) {
+      throw new Error('Job cannot be cancelled - it has already finished or been cancelled');
+    }
+    
+    return await this.update({
+      cancelledAt: new Date(),
+      notBefore: null, // Clear any retry schedule
+    });
+  }
+
+  /**
    * Deletes the job from the database.
    */
   public async delete(): Promise<DatabaseJob<T, U>> {

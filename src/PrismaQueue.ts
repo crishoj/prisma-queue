@@ -49,6 +49,7 @@ export type PrismaQueueEvents<T extends JobPayload = JobPayload, U extends JobRe
   dequeue: (job: PrismaJob<T, U>) => void;
   success: (result: U, job: PrismaJob<T, U>) => void;
   error: (error: unknown, job?: PrismaJob<T, U>) => void;
+  cancel: (job: PrismaJob<T, U>) => void;
 };
 
 // eslint-disable-next-line @typescript-eslint/consistent-type-definitions
@@ -552,5 +553,38 @@ export class PrismaQueue<
     return await this.model().count({
       where,
     });
+  }
+
+  /**
+   * Cancels a job by ID.
+   * @param {number | bigint} id - The ID of the job to cancel.
+   * @returns {Promise<PrismaJob<T, U>>} The cancelled job.
+   * @throws {Error} If the job is not found or cannot be cancelled.
+   */
+  public async cancel(id: number | bigint): Promise<PrismaJob<T, U>> {
+    const record = await this.model().findUnique({ where: { id } });
+    if (!record) {
+      throw new Error(`Job with id ${id} not found`);
+    }
+    
+    if (record.finishedAt || record.cancelledAt) {
+      throw new Error('Job cannot be cancelled - it has already finished or been cancelled');
+    }
+    
+    const updatedRecord = await this.model().update({
+      where: { id },
+      data: {
+        cancelledAt: new Date(),
+        notBefore: null, // Clear any retry schedule
+      },
+    });
+    
+    const job = new PrismaJob<T, U>(updatedRecord as DatabaseJob<T, U>, {
+      model: this.model(),
+      client: this.#prisma,
+    });
+    
+    this.emit("cancel", job);
+    return job;
   }
 }
